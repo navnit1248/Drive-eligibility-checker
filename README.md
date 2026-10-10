@@ -43,6 +43,8 @@ Expressions support `AND`, `OR`, `NOT`, comparisons (`>=`, `<=`, `>`, `<`, `==`,
 
 ## Registration and drive clashes
 
+Run `python main.py --demo` to see every failing condition, AND/OR/NOT rules, clash detection and registration in action, and `python main.py --benchmark` for the 100,000 students × 100 companies run (about 1 minute).
+
 Start the interactive local-record menu with `python main.py --interactive`. Add students and company rules, schedule drives with a date and start/end times, then use **Register student for a drive**. A registration is saved only if the student is eligible, is not already registered for that drive, and has no active overlapping registration. Drive intervals are half-open: one drive ending at 12:00 and another starting at 12:00 do not conflict.
 
 The interactive mode stores records in `data/students.json`, `companies.json`, `drives.json`, and `registrations.json`; missing files are created as empty lists. The menu's confirmed demo-data reset is optional.
@@ -75,4 +77,4 @@ Run all tests, including the 100,000-by-100 workload:
 python -m unittest discover -v
 ```
 
-The tests cover lexing, syntax errors, expression behavior and explanations, registration/clashes, persistence, sample input, and scale. Code is organized into `lexer.py`, `parser.py`, `evaluator.py`, `eligibility.py`, `scheduler.py`, `registration.py`, `storage.py`, and the CLI in `main.py`.
+The tests cover lexing, syntax errors, expression behavior and explanations, registration/clashes, persistence, sample input, and scale. The compact code layout is `rule_engine.py` (lexer, parser, AST, evaluator, and eligibility), `registration.py` (schedule overlap and registration checks), `models.py`, `storage.py`, `reports.py`, `sample_data.py`, and the CLI in `main.py`.

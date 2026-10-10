@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from eligibility import EligibilityService
 from models import Company, Registration, Student
+from rule_engine import EligibilityService
 
 
 @dataclass(frozen=True)

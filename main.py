@@ -7,14 +7,16 @@ import json
 import sys
 from typing import TypeVar
 
-from eligibility import EligibilityService
-from evaluator import EvaluationError, Evaluator
 from models import Company, Drive, Student
-from parser import ParseError, parse
-from registration import RegistrationRejected, RegistrationService
+from registration import (
+    RegistrationRejected,
+    RegistrationService,
+    overlaps,
+    validate_drive,
+)
 from reports import evaluate_company, registrations_for_student
+from rule_engine import EligibilityService, EvaluationError, Evaluator, ParseError, parse
 from sample_data import reset_demo_data
-from scheduler import overlaps, validate_drive
 from storage import JsonStorage, StorageError
 
 T = TypeVar("T")
@@ -185,7 +187,7 @@ def view_registration_report(storage: JsonStorage) -> None:
 
 
 def build_company_rule(line: str) -> str:
-    values = line.split()
+    values = line.replace(",", " ").split()
     if len(values) < 3:
         raise ValueError("Company rule must be: minCGPA maxArrears department...")
     try:
@@ -206,29 +208,44 @@ def build_company_rule(line: str) -> str:
     )
 
 
+def read_batch_line(prompt: str, missing_message: str) -> str:
+    if sys.stdin.isatty():
+        return input(prompt)
+    line = sys.stdin.readline()
+    if not line:
+        raise ValueError(missing_message)
+    return line
+
+
 def run_batch(rule: str | None) -> None:
     if rule is None:
-        first_line = sys.stdin.readline()
-        if not first_line:
-            raise ValueError("Missing company rule line.")
+        first_line = read_batch_line(
+            "Company rule (minimum CGPA, maximum arrears, allowed departments): ",
+            "No company rule input. Run this program in a terminal and enter the company rule, "
+            "then student count and student records. See README.md for the input format.",
+        )
         expression = build_company_rule(first_line)
     else:
         expression = rule
     tree = parse(expression)
 
-    count_line = sys.stdin.readline()
+    count_line = read_batch_line(
+        "Number of students: ",
+        "Missing student count. Enter the student count after the company rule.",
+    )
     try:
         student_count = int(count_line)
     except ValueError as exc:
-        raise ValueError("Expected the number of students after the company rule.") from exc
+        raise ValueError("Student count must be a whole number.") from exc
     if student_count < 0:
         raise ValueError("Number of students cannot be negative.")
 
     for _ in range(student_count):
-        line = sys.stdin.readline()
-        if not line:
-            raise ValueError("Input ended before all student records were read.")
-        fields = line.split()
+        line = read_batch_line(
+            "Student (ID CGPA arrears department): ",
+            "Input ended before all student records were read.",
+        )
+        fields = line.replace(",", " ").split()
         if len(fields) != 4:
             raise ValueError(f"Student record must be: ID CGPA arrears department; got {line.strip()!r}.")
         try:
@@ -313,8 +330,68 @@ def run(storage: JsonStorage) -> None:
             print(f"Error: {exc}")
 
 
+def run_demo() -> None:
+    """Show every required feature on small data, using a temporary store."""
+    import tempfile
+
+    print("1. Every failing condition is reported (rule: CGPA >= 7 AND arrears <= 0)")
+    student = Student("S9", 6.0, 2, "ECE")
+    for reason in Evaluator(student).evaluate(parse("cgpa >= 7.0 AND arrears == 0")).failures:
+        print(f"   - {reason}")
+
+    print("\n2. Custom AND / OR / NOT rules (recursive-descent parser)")
+    rule = 'cgpa >= 7.0 AND NOT (arrears > 1) AND (department == "CSE" OR department == "IT")'
+    print(f"   Rule: {rule}")
+    print(f"   Parsed tree: {parse(rule)}")
+    for sample in (Student("A1", 8.0, 0, "IT"), Student("A2", 8.0, 3, "IT"), Student("A3", 9.0, 0, "ECE")):
+        passed = Evaluator(sample).evaluate(parse(rule)).passed
+        print(f"   {sample.student_id}: {'ELIGIBLE' if passed else 'NOT ELIGIBLE'}")
+
+    print("\n3. Drive clashes and 4. registration")
+    with tempfile.TemporaryDirectory() as folder:
+        storage = JsonStorage(folder)
+        storage.save_students([Student("S1", 8.5, 0, "CSE")])
+        storage.save_companies([Company("C1", "Alpha", "cgpa >= 7.0"), Company("C2", "Beta", "cgpa >= 7.0")])
+        storage.save_drives([
+            Drive("D1", "C1", "2026-11-01", "09:00", "12:00"),
+            Drive("D2", "C2", "2026-11-01", "11:00", "14:00"),
+            Drive("D3", "C2", "2026-11-02", "09:00", "12:00"),
+        ])
+        service = RegistrationService(storage)
+        for drive_id in ("D1", "D2", "D3"):
+            try:
+                service.register("S1", drive_id)
+                print(f"   register S1 {drive_id}: OK")
+            except RegistrationRejected as exc:
+                print(f"   register S1 {drive_id}: REJECTED - {exc}")
+
+
+def run_benchmark(students: int = 100_000, companies: int = 100) -> None:
+    import random
+    import time
+
+    random.seed(1)
+    departments = ["CSE", "IT", "ECE", "MECH"]
+    people = [
+        Student(f"S{i}", round(random.uniform(5, 10), 1), random.randint(0, 3), random.choice(departments))
+        for i in range(students)
+    ]
+    trees = [
+        parse(f'cgpa >= {5 + c % 5} AND arrears <= {c % 3} AND (department == "CSE" OR department == "IT")')
+        for c in range(companies)
+    ]
+    start = time.perf_counter()
+    eligible = sum(Evaluator(s).evaluate(t).passed for t in trees for s in people)
+    elapsed = time.perf_counter() - start
+    total = students * companies
+    print(f"{students} students x {companies} companies = {total} checks in {elapsed:.1f}s")
+    print(f"{eligible} eligible results")
+
+
 def main() -> None:
     command_line = argparse.ArgumentParser(description="Check placement-drive eligibility.")
+    command_line.add_argument("--demo", action="store_true", help="demonstrate every feature")
+    command_line.add_argument("--benchmark", action="store_true", help="run 100000 students x 100 companies")
     command_line.add_argument(
         "--interactive",
         action="store_true",
@@ -326,7 +403,11 @@ def main() -> None:
     )
     args = command_line.parse_args()
     try:
-        if args.interactive:
+        if args.demo:
+            run_demo()
+        elif args.benchmark:
+            run_benchmark()
+        elif args.interactive:
             run(JsonStorage())
         else:
             run_batch(args.rule)

@@ -6,15 +6,19 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from eligibility import EligibilityService
-from evaluator import EvaluationError, Evaluator
-from lexer import LexerError, tokenize
 from models import Company, Drive, Registration, Student
-from parser import ParseError, parse
-from registration import RegistrationRejected, RegistrationService
+from registration import RegistrationRejected, RegistrationService, overlaps
 from reports import evaluate_company
+from rule_engine import (
+    EligibilityService,
+    EvaluationError,
+    Evaluator,
+    LexerError,
+    ParseError,
+    parse,
+    tokenize,
+)
 from sample_data import reset_demo_data
-from scheduler import overlaps
 from storage import JsonStorage
 from main import run_batch
 
@@ -177,6 +181,18 @@ class BatchTests(unittest.TestCase):
 
 
 class BatchInputTests(unittest.TestCase):
+    def test_empty_input_explains_expected_input(self) -> None:
+        with patch("sys.stdin", StringIO("")), self.assertRaisesRegex(
+            ValueError, "No company rule input"
+        ):
+            run_batch(None)
+
+    def test_comma_separated_rule_line_is_accepted(self) -> None:
+        input_data = "7, 2, CSE, IT\n1\nS1, 8.2, 0, CSE\n"
+        with patch("sys.stdin", StringIO(input_data)), patch("sys.stdout", new_callable=StringIO) as output:
+            run_batch(None)
+        self.assertIn("S1 ELIGIBLE", output.getvalue())
+
     def test_given_input_and_reports_failed_conditions(self) -> None:
         input_data = "7.0 0 CSE IT\n3\nS1 8.2 0 CSE\nS2 7.1 1 CSE\nS3 6.4 0 IT\n"
         with patch("sys.stdin", StringIO(input_data)), patch("sys.stdout", new_callable=StringIO) as output:
