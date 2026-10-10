@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from eligibility import EligibilityService
 from evaluator import EvaluationError, Evaluator
@@ -14,6 +16,7 @@ from reports import evaluate_company
 from sample_data import reset_demo_data
 from scheduler import overlaps
 from storage import JsonStorage
+from main import run_batch
 
 
 class ParserEvaluatorTests(unittest.TestCase):
@@ -151,10 +154,10 @@ class RegistrationTests(unittest.TestCase):
 
 
 class BatchTests(unittest.TestCase):
-    def test_10000_students_against_100_companies(self) -> None:
+    def test_100000_students_against_100_companies(self) -> None:
         students = [
             Student(f"S{index}", float(index % 11), index % 3, "CSE" if index % 2 else "ECE")
-            for index in range(10_000)
+            for index in range(100_000)
         ]
         companies = [
             Company(
@@ -165,11 +168,32 @@ class BatchTests(unittest.TestCase):
             for index in range(100)
         ]
         service = EligibilityService()
-        evaluated = 0
-        for company in companies:
-            report = evaluate_company(students, company, service)
-            evaluated += len(report.eligible) + len(report.ineligible)
-        self.assertEqual(evaluated, 1_000_000)
+        eligible = sum(
+            service.is_eligible(student, company)
+            for company in companies
+            for student in students
+        )
+        self.assertEqual(eligible, 1_969_740)
+
+
+class BatchInputTests(unittest.TestCase):
+    def test_given_input_and_reports_failed_conditions(self) -> None:
+        input_data = "7.0 0 CSE IT\n3\nS1 8.2 0 CSE\nS2 7.1 1 CSE\nS3 6.4 0 IT\n"
+        with patch("sys.stdin", StringIO(input_data)), patch("sys.stdout", new_callable=StringIO) as output:
+            run_batch(None)
+        self.assertIn("S1 ELIGIBLE", output.getvalue())
+        self.assertIn("S2 NOT ELIGIBLE (arrears)", output.getvalue())
+        self.assertIn("S3 NOT ELIGIBLE (cgpa)", output.getvalue())
+
+    def test_custom_rule_reports_every_failed_condition(self) -> None:
+        input_data = "1\nS1 6.0 2 ECE\n"
+        rule = 'CGPA >= 7.0 AND arrears == 0 AND department == "CSE"'
+        with patch("sys.stdin", StringIO(input_data)), patch("sys.stdout", new_callable=StringIO) as output:
+            run_batch(rule)
+        self.assertIn("S1 NOT ELIGIBLE (cgpa, arrears, department)", output.getvalue())
+        self.assertIn("CGPA is 6.0", output.getvalue())
+        self.assertIn("Arrears are 2", output.getvalue())
+        self.assertIn("Department is ECE", output.getvalue())
 
 
 class SampleDataTests(unittest.TestCase):

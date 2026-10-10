@@ -29,39 +29,69 @@ class Evaluator:
         self.student = student
 
     def evaluate(self, node: AstNode) -> Evaluation:
+        if self._passes(node):
+            return Evaluation(True)
+        failures: list[str] = []
+        self._collect_failures(node, failures)
+        return Evaluation(False, tuple(failures))
+
+    def is_eligible(self, node: AstNode) -> bool:
+        return self._passes(node)
+
+    def _passes(self, node: AstNode) -> bool:
         if isinstance(node, Comparison):
             return self._compare(node)
         if isinstance(node, Logical):
-            left = self.evaluate(node.left)  # type: ignore[arg-type]
-            right = self.evaluate(node.right)  # type: ignore[arg-type]
             if node.operator == "AND":
-                failures = left.failures + right.failures
-                return Evaluation(left.passed and right.passed, failures)
+                return self._passes(node.left) and self._passes(node.right)  # type: ignore[arg-type]
             if node.operator == "OR":
-                if left.passed or right.passed:
-                    return Evaluation(True)
-                return Evaluation(False, left.failures + right.failures)
+                return self._passes(node.left) or self._passes(node.right)  # type: ignore[arg-type]
             raise EvaluationError(f"Unsupported logical operator {node.operator!r}.")
         if isinstance(node, Negation):
-            inner = self.evaluate(node.operand)  # type: ignore[arg-type]
-            if inner.passed:
-                return Evaluation(False, (f"NOT ({self._describe(node.operand)}) is false.",))
-            return Evaluation(True)
+            return not self._passes(node.operand)  # type: ignore[arg-type]
+        raise EvaluationError(f"Unsupported AST node {type(node).__name__}.")
+
+    def _collect_failures(self, node: AstNode, failures: list[str]) -> None:
+        if isinstance(node, Comparison):
+            left = self._resolve(node.left)
+            right = self._resolve(node.right)
+            if not self._compare_values(left, node.operator, right):
+                failures.append(self._failure_text(node, left, right))
+            return
+        if isinstance(node, Logical):
+            if node.operator == "AND":
+                self._collect_failures(node.left, failures)  # type: ignore[arg-type]
+                self._collect_failures(node.right, failures)  # type: ignore[arg-type]
+            elif node.operator == "OR":
+                if not self._passes(node.left) and not self._passes(node.right):  # type: ignore[arg-type]
+                    left_failures: list[str] = []
+                    self._collect_failures(node.left, left_failures)  # type: ignore[arg-type]
+                    right_failures: list[str] = []
+                    self._collect_failures(node.right, right_failures)  # type: ignore[arg-type]
+                    failures.extend(left_failures)
+                    failures.extend(right_failures)
+            else:
+                raise EvaluationError(f"Unsupported logical operator {node.operator!r}.")
+            return
+        if isinstance(node, Negation):
+            if self._passes(node.operand):  # type: ignore[arg-type]
+                failures.append(f"NOT ({self._describe(node.operand)}) is false.")
+            return
         raise EvaluationError(f"Unsupported AST node {type(node).__name__}.")
 
     def _resolve(self, operand: Literal | Identifier) -> object:
         if isinstance(operand, Literal):
             return operand.value
-        fields: dict[str, object] = {
-            "cgpa": self.student.cgpa,
-            "arrears": self.student.arrears,
-            "department": self.student.department,
-            "student_id": self.student.student_id,
-        }
-        try:
-            return fields[operand.name.casefold()]
-        except KeyError as exc:
-            raise EvaluationError(f"Unknown student field {operand.name!r}.") from exc
+        name = operand.name.casefold()
+        if name == "cgpa":
+            return self.student.cgpa
+        if name == "arrears":
+            return self.student.arrears
+        if name == "department":
+            return self.student.department
+        if name == "student_id":
+            return self.student.student_id
+        raise EvaluationError(f"Unknown student field {operand.name!r}.")
 
     @staticmethod
     def _compatible(left: object, right: object) -> bool:
@@ -71,30 +101,36 @@ class Evaluator:
             return True
         return type(left) is type(right)
 
-    def _compare(self, node: Comparison) -> Evaluation:
-        left = self._resolve(node.left)
-        right = self._resolve(node.right)
-        if not self._compatible(left, right):
+    def _compare(self, node: Comparison) -> bool:
+        return self._compare_values(
+            self._resolve(node.left), node.operator, self._resolve(node.right)
+        )
+
+    @classmethod
+    def _compare_values(cls, left: object, operator: str, right: object) -> bool:
+        if not cls._compatible(left, right):
             raise EvaluationError(
                 f"Cannot compare {type(left).__name__} with {type(right).__name__}."
             )
-        operations = {
-            "==": lambda: left == right,
-            "!=": lambda: left != right,
-            ">": lambda: left > right,  # type: ignore[operator]
-            ">=": lambda: left >= right,  # type: ignore[operator]
-            "<": lambda: left < right,  # type: ignore[operator]
-            "<=": lambda: left <= right,  # type: ignore[operator]
-        }
         try:
-            passed = bool(operations[node.operator]())
-        except (TypeError, KeyError) as exc:
-            raise EvaluationError(f"Cannot apply {node.operator!r} to these values.") from exc
-        if passed:
-            return Evaluation(True)
-        return Evaluation(False, (self._failure_text(node, left, right),))
+            if operator == "==":
+                return left == right
+            if operator == "!=":
+                return left != right
+            if operator == ">":
+                return left > right  # type: ignore[operator]
+            if operator == ">=":
+                return left >= right  # type: ignore[operator]
+            if operator == "<":
+                return left < right  # type: ignore[operator]
+            if operator == "<=":
+                return left <= right  # type: ignore[operator]
+        except TypeError as exc:
+            raise EvaluationError(f"Cannot apply {operator!r} to these values.") from exc
+        raise EvaluationError(f"Unsupported comparison operator {operator!r}.")
 
-    def _failure_text(self, node: Comparison, actual: object, expected: object) -> str:
+    @staticmethod
+    def _failure_text(node: Comparison, actual: object, expected: object) -> str:
         if isinstance(node.left, Identifier):
             field_name = node.left.name.casefold()
             if field_name == "cgpa" and node.operator in {">", ">="}:
@@ -114,16 +150,17 @@ class Evaluator:
             "condition failed."
         )
 
-    def _describe(self, node: object) -> str:
+    @staticmethod
+    def _describe(node: object) -> str:
         if isinstance(node, Comparison):
             return (
-                f"{self._describe_operand(node.left)} {node.operator} "
-                f"{self._describe_operand(node.right)}"
+                f"{Evaluator._describe_operand(node.left)} {node.operator} "
+                f"{Evaluator._describe_operand(node.right)}"
             )
         if isinstance(node, Negation):
-            return f"NOT ({self._describe(node.operand)})"
+            return f"NOT ({Evaluator._describe(node.operand)})"
         if isinstance(node, Logical):
-            return f"({self._describe(node.left)} {node.operator} {self._describe(node.right)})"
+            return f"({Evaluator._describe(node.left)} {node.operator} {Evaluator._describe(node.right)})"
         return str(node)
 
     @staticmethod

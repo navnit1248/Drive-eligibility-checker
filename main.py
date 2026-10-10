@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
+import json
+import sys
 from typing import TypeVar
 
 from eligibility import EligibilityService
-from evaluator import EvaluationError
-from models import Drive, Student
+from evaluator import EvaluationError, Evaluator
+from models import Company, Drive, Student
 from parser import ParseError, parse
 from registration import RegistrationRejected, RegistrationService
 from reports import evaluate_company, registrations_for_student
@@ -106,7 +109,7 @@ def evaluate_one(storage: JsonStorage) -> None:
     company = choose(storage.load_companies(), "company_id", "Company")
     result = EligibilityService().evaluate(student, company)
     print(f"\n{student.student_id}: {'ELIGIBLE' if result.eligible else 'NOT ELIGIBLE'}")
-    for reason in result.reasons:
+    for reason in result.failures:
         print(f"- {reason}")
 
 
@@ -181,6 +184,73 @@ def view_registration_report(storage: JsonStorage) -> None:
         print("No clashes found.")
 
 
+def build_company_rule(line: str) -> str:
+    values = line.split()
+    if len(values) < 3:
+        raise ValueError("Company rule must be: minCGPA maxArrears department...")
+    try:
+        minimum_cgpa = float(values[0])
+        maximum_arrears = int(values[1])
+    except ValueError as exc:
+        raise ValueError("Minimum CGPA must be numeric and maximum arrears an integer.") from exc
+    if not 0 <= minimum_cgpa <= 10:
+        raise ValueError("Minimum CGPA must be between 0 and 10.")
+    if maximum_arrears < 0:
+        raise ValueError("Maximum arrears cannot be negative.")
+    departments = " OR ".join(
+        f"department == {json.dumps(department)}" for department in values[2:]
+    )
+    return (
+        f"CGPA >= {minimum_cgpa} AND arrears <= {maximum_arrears} "
+        f"AND ({departments})"
+    )
+
+
+def run_batch(rule: str | None) -> None:
+    if rule is None:
+        first_line = sys.stdin.readline()
+        if not first_line:
+            raise ValueError("Missing company rule line.")
+        expression = build_company_rule(first_line)
+    else:
+        expression = rule
+    tree = parse(expression)
+
+    count_line = sys.stdin.readline()
+    try:
+        student_count = int(count_line)
+    except ValueError as exc:
+        raise ValueError("Expected the number of students after the company rule.") from exc
+    if student_count < 0:
+        raise ValueError("Number of students cannot be negative.")
+
+    for _ in range(student_count):
+        line = sys.stdin.readline()
+        if not line:
+            raise ValueError("Input ended before all student records were read.")
+        fields = line.split()
+        if len(fields) != 4:
+            raise ValueError(f"Student record must be: ID CGPA arrears department; got {line.strip()!r}.")
+        try:
+            student = Student(fields[0], float(fields[1]), int(fields[2]), fields[3])
+        except ValueError as exc:
+            raise ValueError(f"Invalid student record {fields[0]!r}: {exc}") from exc
+        result = Evaluator(student).evaluate(tree)
+        if result.passed:
+            print(f"{student.student_id} ELIGIBLE")
+            continue
+
+        labels: list[str] = []
+        for reason in result.failures:
+            first_word = reason.partition(" ")[0].casefold()
+            label = first_word if first_word in {"cgpa", "arrears", "department"} else "rule"
+            if label not in labels:
+                labels.append(label)
+        print(f"{student.student_id} NOT ELIGIBLE ({', '.join(labels)})")
+        for reason in result.failures:
+            print(f"  - {reason}")
+
+
 def run(storage: JsonStorage) -> None:
     while True:
         print(MENU)
@@ -244,10 +314,27 @@ def run(storage: JsonStorage) -> None:
 
 
 def main() -> None:
+    command_line = argparse.ArgumentParser(description="Check placement-drive eligibility.")
+    command_line.add_argument(
+        "--interactive",
+        action="store_true",
+        help="open the local menu for managing students, companies, drives, and registrations",
+    )
+    command_line.add_argument(
+        "--rule",
+        help="evaluate a custom expression; stdin then starts with the student count",
+    )
+    args = command_line.parse_args()
     try:
-        run(JsonStorage())
+        if args.interactive:
+            run(JsonStorage())
+        else:
+            run_batch(args.rule)
     except (EOFError, KeyboardInterrupt):
         print("\nGoodbye.")
+    except (ValueError, StorageError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
 
 
 if __name__ == "__main__":
