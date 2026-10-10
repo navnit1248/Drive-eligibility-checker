@@ -1,0 +1,23 @@
+[
+  {
+    "drive_id": "D1",
+    "company_id": "TECH",
+    "date": "2030-06-01",
+    "start_time": "10:00",
+    "end_time": "12:00"
+  },
+  {
+    "drive_id": "D2",
+    "company_id": "ALT",
+    "date": "2030-06-01",
+    "start_time": "11:00",
+    "end_time": "13:00"
+  },
+  {
+    "drive_id": "D3",
+    "company_id": "CLEAR",
+    "date": "2030-06-01",
+    "start_time": "12:00",
+    "end_time": "13:00"
+  }
+]

@@ -1,0 +1,28 @@
+[
+  {
+    "company_id": "TECH",
+    "name": "TechNova",
+    "eligibility_rule": "CGPA >= 7.0 AND arrears == 0 AND department == \"CSE\"",
+    "min_cgpa": 7.0,
+    "max_arrears": 0,
+    "allowed_departments": [
+      "CSE"
+    ]
+  },
+  {
+    "company_id": "ALT",
+    "name": "AltSystems",
+    "eligibility_rule": "CGPA >= 8.0 OR department == \"ECE\"",
+    "min_cgpa": null,
+    "max_arrears": null,
+    "allowed_departments": []
+  },
+  {
+    "company_id": "CLEAR",
+    "name": "ClearPath",
+    "eligibility_rule": "NOT (arrears > 0)",
+    "min_cgpa": null,
+    "max_arrears": null,
+    "allowed_departments": []
+  }
+]

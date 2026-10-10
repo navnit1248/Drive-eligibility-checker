@@ -1,0 +1,26 @@
+[
+  {
+    "student_id": "S1",
+    "cgpa": 8.2,
+    "arrears": 0,
+    "department": "CSE"
+  },
+  {
+    "student_id": "S2",
+    "cgpa": 7.1,
+    "arrears": 1,
+    "department": "CSE"
+  },
+  {
+    "student_id": "S3",
+    "cgpa": 6.4,
+    "arrears": 0,
+    "department": "IT"
+  },
+  {
+    "student_id": "123",
+    "cgpa": 8.5,
+    "arrears": 0,
+    "department": "CSE"
+  }
+]

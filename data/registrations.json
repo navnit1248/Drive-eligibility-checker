@@ -1,0 +1,14 @@
+[
+  {
+    "registration_id": "b9396206-600e-4576-aa6b-a9ec1535807c",
+    "student_id": "S1",
+    "drive_id": "D1",
+    "active": true
+  },
+  {
+    "registration_id": "c7c317be-de8f-4a87-a6d5-03c97554567e",
+    "student_id": "S1",
+    "drive_id": "D3",
+    "active": true
+  }
+]
